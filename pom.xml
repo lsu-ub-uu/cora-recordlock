@@ -23,10 +23,19 @@
 	<name>cora-recordlock</name>
 
 	<properties>
-		<postgres.version>42.7.14</postgres.version>
+		<spider.version>10.13-SNAPSHOT</spider.version>
+		<sqldatabase.version>7.11.0</sqldatabase.version>
 		
-		<initialize.version>1.7.0</initialize.version>
+		<beefeater.version>4.0.0</beefeater.version>
+		<search.version>6.0.0</search.version>
+		<storage.version>10.0.0</storage.version>
+		<bookkeeper.version>11.9.0</bookkeeper.version>
+		<coradata.version>11.2.0</coradata.version>
+		<json.version>3.11.0</json.version>
+		<messaging.version>3.1.0</messaging.version>
+		
 		<logger.version>2.10.0</logger.version>
+		<logger-spies.version>1.5.0</logger-spies.version>
 		<testutils.version>1.14.0</testutils.version>
 		<testspies.version>1.2.0</testspies.version>
 	</properties>
@@ -42,26 +51,77 @@
 	<dependencies>
 		<dependency>
 			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>spider</artifactId>
+			<version>${spider.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>sqldatabase</artifactId>
+			<version>${sqldatabase.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
 			<artifactId>logger</artifactId>
 			<version>${logger.version}</version>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
 			<groupId>se.uu.ub.cora</groupId>
-			<artifactId>initialize</artifactId>
-			<version>${initialize.version}</version>
+			<artifactId>logger-spies</artifactId>
+			<version>${logger-spies.version}</version>
 			<scope>provided</scope>
 		</dependency>
+		
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>beefeater</artifactId>
+			<version>${beefeater.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>search</artifactId>
+			<version>${search.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>storage</artifactId>
+			<version>${storage.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>bookkeeper</artifactId>
+			<version>${bookkeeper.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>coradata</artifactId>
+			<version>${coradata.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>json</artifactId>
+			<version>${json.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>messaging</artifactId>
+			<version>${messaging.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		
 		<dependency>
 			<groupId>org.testng</groupId>
 			<artifactId>testng</artifactId>
 			<version>${testng.version}</version>
 			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.postgresql</groupId>
-			<artifactId>postgresql</artifactId>
-			<version>${postgres.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>se.uu.ub.cora</groupId>
@@ -74,6 +134,11 @@
 			<artifactId>testspies</artifactId>
 			<version>${testspies.version}</version>
 			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>se.uu.ub.cora</groupId>
+			<artifactId>initialize-spies</artifactId>
+			<version>1.8-SNAPSHOT</version>
 		</dependency>
 	</dependencies>
 </project>

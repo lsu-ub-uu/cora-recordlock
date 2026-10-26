@@ -18,27 +18,19 @@
  */
 package se.uu.ub.cora.recordlock;
 
-/**
- * RecordLockException is thrown when a record lock can not be acquired, for instance when the
- * maximum waiting time is reached or the waiting thread is interrupted.
- */
-public class RecordLockException extends RuntimeException {
+import se.uu.ub.cora.testutils.mcr.MethodCallRecorder;
+import se.uu.ub.cora.testutils.mrv.MethodReturnValues;
 
-	private static final long serialVersionUID = 1L;
+public class SleeperSpy implements Sleeper {
+	public MethodCallRecorder MCR = new MethodCallRecorder();
+	public MethodReturnValues MRV = new MethodReturnValues();
 
-	private RecordLockException(String message) {
-		super(message);
+	public SleeperSpy() {
+		MCR.useMRV(MRV);
 	}
 
-	private RecordLockException(String message, Exception exception) {
-		super(message, exception);
-	}
-
-	public static RecordLockException withMessage(String message) {
-		return new RecordLockException(message);
-	}
-
-	public static RecordLockException withMessageAndException(String message, Exception exception) {
-		return new RecordLockException(message, exception);
+	@Override
+	public void sleepMilliseconds(long milliseconds) {
+		MCR.addCall("milliseconds", milliseconds);
 	}
 }
