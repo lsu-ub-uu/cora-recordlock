@@ -75,7 +75,7 @@ public class DatabaseFacadeSpy implements DatabaseFacade {
 
 	@Override
 	public void close() {
-		MCR.addCallAndReturnFromMRV();
+		MCR.addCall();
 	}
 
 }

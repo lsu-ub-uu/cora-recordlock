@@ -61,10 +61,26 @@ public class RecordLockTest {
 	}
 
 	@Test
-	public void testRecordLockIsAutoCloseable() {
+	public void testRecordLockImlementsRecordLock() {
 		recordLock = getRecordLock();
 
-		assertTrue(recordLock instanceof AutoCloseable);
+		assertTrue(recordLock instanceof RecordLock);
+	}
+
+	@Test
+	public void testErrorOnCreate() {
+		RuntimeException exception = new RuntimeException("some error!");
+		databaseFactory.MRV.setAlwaysThrowException("factorDatabaseFacade", exception);
+
+		try {
+			getRecordLock();
+			fail("should have thrown");
+		} catch (Exception e) {
+			assertTrue(e instanceof RecordLockException);
+			assertEquals(e.getMessage(),
+					"Could not factor facade lock for type: someType and id: someId.");
+			assertSame(e.getCause(), exception);
+		}
 	}
 
 	@Test
@@ -201,6 +217,22 @@ public class RecordLockTest {
 			}
 			return 1;
 		});
+		recordLock = getRecordLock();
+
+		try {
+			recordLock.close();
+			fail("RecordLockException should have been thrown");
+		} catch (Exception e) {
+			assertTrue(e instanceof RecordLockException);
+			assertSame(e.getCause(), error);
+		}
+		databaseFacade.MCR.assertMethodWasCalled("close");
+	}
+
+	@Test
+	public void testCloseWithError() {
+		SqlDatabaseException error = SqlDatabaseException.withMessage("close failed");
+		databaseFacade.MRV.setAlwaysThrowException("close", error);
 		recordLock = getRecordLock();
 
 		try {

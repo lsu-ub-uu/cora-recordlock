@@ -70,7 +70,7 @@ public class RecordLockImp implements RecordLock {
 		try {
 			return databaseFactory.factorDatabaseFacade();
 		} catch (RuntimeException e) {
-			throw asRecordLockException(e, "acquire");
+			throw asRecordLockException(e, "factor facade");
 		}
 	}
 
@@ -123,29 +123,37 @@ public class RecordLockImp implements RecordLock {
 
 	@Override
 	public void close() {
-		RuntimeException releaseFailure = null;
+		RecordLockException releaseFailure = null;
 		try {
-			databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(recordType, recordId));
+			releaseLock();
 		} catch (RuntimeException e) {
 			releaseFailure = asRecordLockException(e, "release");
 		} finally {
-			try {
-				databaseFacade.close();
-			} catch (RuntimeException closeFailure) {
-				if (releaseFailure == null) {
-					throw asRecordLockException(closeFailure, "release");
-				}
-				releaseFailure.addSuppressed(closeFailure);
-			}
+			closeFacade(releaseFailure);
 		}
 		if (releaseFailure != null) {
 			throw releaseFailure;
 		}
 	}
 
+	private void releaseLock() {
+		databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(recordType, recordId));
+	}
+
+	private void closeFacade(RecordLockException releaseFailure) {
+		try {
+			databaseFacade.close();
+		} catch (RuntimeException closeFailure) {
+			if (releaseFailure == null) {
+				throw asRecordLockException(closeFailure, "release");
+			}
+			releaseFailure.addSuppressed(closeFailure);
+		}
+	}
+
 	private RecordLockException asRecordLockException(RuntimeException failure, String operation) {
-		if (failure instanceof RecordLockException) {
-			return (RecordLockException) failure;
+		if (failure instanceof RecordLockException recordLockEx) {
+			return recordLockEx;
 		}
 		return RecordLockException.withMessageAndException("Could not " + operation
 				+ " lock for type: " + recordType + " and id: " + recordId + ".", failure);
