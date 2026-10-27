@@ -39,7 +39,6 @@ public class RecordLockImp implements RecordLock {
 	private final SqlDatabaseFactory databaseFactory;
 	private final Sleeper sleeper;
 	private final TimeSource timeSource;
-	private final DatabaseFacade databaseFacade;
 	private final String recordType;
 	private final String recordId;
 
@@ -62,38 +61,27 @@ public class RecordLockImp implements RecordLock {
 		this.timeSource = timeSource;
 		this.recordType = recordType;
 		this.recordId = recordId;
-		databaseFacade = factorDatabaseFacade();
-		acquire();
+		acquireLock();
 	}
 
-	private DatabaseFacade factorDatabaseFacade() {
-		try {
-			return databaseFactory.factorDatabaseFacade();
+	private void acquireLock() {
+		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
+			acquireUntilLockIsInserted(databaseFacade);
 		} catch (RuntimeException e) {
-			throw asRecordLockException(e, "factor facade");
+			throw asRecordLockException(e, "acquire");
 		}
 	}
 
-	private void acquire() {
-		try {
-			acquireUntilLockIsInserted();
-		} catch (RuntimeException e) {
-			RecordLockException failure = asRecordLockException(e, "acquire");
-			closeFacadeAfterAcquisitionFailure(failure);
-			throw failure;
-		}
-	}
-
-	private void acquireUntilLockIsInserted() {
+	private void acquireUntilLockIsInserted(DatabaseFacade databaseFacade) {
 		long deadline = timeSource.currentTimeMillis() + MAX_WAIT_MILLIS;
-		while (!tryToInsertLock(deadline)) {
+		while (!tryToInsertLock(databaseFacade, deadline)) {
 			sleeper.sleepMilliseconds(RETRY_INTERVAL_MILLIS);
 		}
 	}
 
-	private boolean tryToInsertLock(long deadline) {
+	private boolean tryToInsertLock(DatabaseFacade databaseFacade, long deadline) {
 		try {
-			insertLock();
+			insertLock(databaseFacade);
 			return true;
 		} catch (SqlConflictException e) {
 			throwIfTimeLimitReached(deadline, e);
@@ -101,7 +89,7 @@ public class RecordLockImp implements RecordLock {
 		}
 	}
 
-	private void insertLock() {
+	private void insertLock(DatabaseFacade databaseFacade) {
 		databaseFacade.executeSqlWithValues(INSERT_SQL, List.of(recordType, recordId));
 	}
 
@@ -113,42 +101,17 @@ public class RecordLockImp implements RecordLock {
 		}
 	}
 
-	private void closeFacadeAfterAcquisitionFailure(RecordLockException acquisitionFailure) {
-		try {
-			databaseFacade.close();
-		} catch (RuntimeException closeFailure) {
-			acquisitionFailure.addSuppressed(closeFailure);
-		}
-	}
-
 	@Override
 	public void close() {
-		RecordLockException releaseFailure = null;
-		try {
-			releaseLock();
+		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
+			releaseLock(databaseFacade);
 		} catch (RuntimeException e) {
-			releaseFailure = asRecordLockException(e, "release");
-		} finally {
-			closeFacade(releaseFailure);
-		}
-		if (releaseFailure != null) {
-			throw releaseFailure;
+			throw asRecordLockException(e, "release");
 		}
 	}
 
-	private void releaseLock() {
+	private void releaseLock(DatabaseFacade databaseFacade) {
 		databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(recordType, recordId));
-	}
-
-	private void closeFacade(RecordLockException releaseFailure) {
-		try {
-			databaseFacade.close();
-		} catch (RuntimeException closeFailure) {
-			if (releaseFailure == null) {
-				throw asRecordLockException(closeFailure, "release");
-			}
-			releaseFailure.addSuppressed(closeFailure);
-		}
 	}
 
 	private RecordLockException asRecordLockException(RuntimeException failure, String operation) {
