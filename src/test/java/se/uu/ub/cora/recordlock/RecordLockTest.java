@@ -29,24 +29,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import se.uu.ub.cora.recordlock.spy.DatabaseFacadeSpy;
 import se.uu.ub.cora.recordlock.spy.SqlDatabaseFactorySpy;
+import se.uu.ub.cora.recordlock.spy.TableFacadeSpy;
+import se.uu.ub.cora.recordlock.spy.TableQuerySpy;
 import se.uu.ub.cora.spider.recordlock.RecordLock;
 import se.uu.ub.cora.spider.recordlock.RecordLockException;
 import se.uu.ub.cora.sqldatabase.SqlConflictException;
 import se.uu.ub.cora.sqldatabase.SqlDatabaseException;
 
 public class RecordLockTest {
-	private static final String INSERT_SQL = "insert into recordlock (type, id) values (?, ?);";
-	private static final String DELETE_SQL = "delete from recordlock where type = ? and id = ?;";
 	private static final String SOME_TYPE = "someType";
 	private static final String SOME_ID = "someId";
 	private static final long RETRY_INTERVAL_MILLIS = 50;
 	private static final long MAX_WAIT_MILLIS = 60_000;
 
 	private SqlDatabaseFactorySpy dbFactory;
-	private DatabaseFacadeSpy dbFacadeAquire;
-	private DatabaseFacadeSpy dbFacadeRelease;
+	private TableFacadeSpy tableFacadeAquire;
+	private TableFacadeSpy tableFacadeRelease;
+	private TableQuerySpy tableQuery;
 	private SleeperSpy sleeper;
 	private TimeSourceSpy timeSource;
 	private RecordLock recordLock;
@@ -54,10 +54,14 @@ public class RecordLockTest {
 	@BeforeMethod
 	private void beforeMethod() {
 		dbFactory = new SqlDatabaseFactorySpy();
-		dbFacadeAquire = new DatabaseFacadeSpy();
-		dbFacadeRelease = new DatabaseFacadeSpy();
-		dbFactory.MRV.setReturnValues("factorDatabaseFacade",
-				List.of(dbFacadeAquire, dbFacadeRelease));
+
+		tableFacadeAquire = new TableFacadeSpy();
+		tableFacadeRelease = new TableFacadeSpy();
+		dbFactory.MRV.setReturnValues("factorTableFacade",
+				List.of(tableFacadeAquire, tableFacadeRelease));
+		tableQuery = new TableQuerySpy();
+		dbFactory.MRV.setReturnValues("factorTableQuery", List.of(tableQuery), "recordlock");
+
 		sleeper = new SleeperSpy();
 		timeSource = new TimeSourceSpy();
 	}
@@ -83,6 +87,11 @@ public class RecordLockTest {
 		assertSame(recordLockImp.onlyForTestGetTimeSource(), timeSource);
 	}
 
+	private RecordLockImp createRecordLock() {
+		return RecordLockImp.usingDatabaseFacadeAndSleeperAndTimeSource(dbFactory, sleeper,
+				timeSource, SOME_TYPE, SOME_ID);
+	}
+
 	@Test
 	public void testRecordLockImlementsRecordLock() {
 		recordLock = createRecordLock();
@@ -90,15 +99,10 @@ public class RecordLockTest {
 		assertTrue(recordLock instanceof RecordLock);
 	}
 
-	private RecordLockImp createRecordLock() {
-		return RecordLockImp.usingDatabaseFacadeAndSleeperAndTimeSource(dbFactory, sleeper,
-				timeSource, SOME_TYPE, SOME_ID);
-	}
-
 	@Test
 	public void testErrorOnCreate() {
 		RuntimeException exception = new RuntimeException("some error!");
-		dbFactory.MRV.setAlwaysThrowException("factorDatabaseFacade", exception);
+		dbFactory.MRV.setAlwaysThrowException("factorTableFacade", exception);
 
 		try {
 			createRecordLock();
@@ -115,12 +119,13 @@ public class RecordLockTest {
 	public void testGettingRecordLockAcquiresLock() {
 		recordLock = createRecordLock();
 
-		dbFacadeAquire.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
-		assertAquireExecutedSqlWithTypeAndId(0, INSERT_SQL);
-		dbFacadeAquire.MCR.assertMethodNotCalled("readUsingSqlAndValues");
-		dbFacadeAquire.MCR.assertMethodNotCalled("readOneRowOrFailUsingSqlAndValues");
+		tableFacadeAquire.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 1);
+		tableQuery.MCR.assertNumberOfCallsToMethod("addParameter", 2);
+		tableQuery.MCR.assertCalledParameters("addParameter", "type", "someType");
+		tableQuery.MCR.assertCalledParameters("addParameter", "id", "someId");
+		tableFacadeAquire.MCR.assertCalledParameters("insertRowUsingQuery", tableQuery);
 		sleeper.MCR.assertMethodNotCalled("sleepMilliseconds");
-		dbFacadeAquire.MCR.assertMethodWasCalled("close");
+		tableFacadeAquire.MCR.assertMethodWasCalled("close");
 	}
 
 	@Test
@@ -129,10 +134,7 @@ public class RecordLockTest {
 
 		recordLock = createRecordLock();
 
-		dbFacadeAquire.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 4);
-		for (int call = 0; call < 4; call++) {
-			assertAquireExecutedSqlWithTypeAndId(call, INSERT_SQL);
-		}
+		tableFacadeAquire.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 4);
 		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 3);
 		for (int call = 0; call < 3; call++) {
 			sleeper.MCR.assertParameters("sleepMilliseconds", call, RETRY_INTERVAL_MILLIS);
@@ -151,19 +153,20 @@ public class RecordLockTest {
 	@Test
 	public void testGettingRecordLockStillRetriesJustBeforeTimeLimit() {
 		throwConflictForNumberOfInserts(1);
+
 		timeSource.MRV.setReturnValues("currentTimeMillis",
 				List.of(1_000L, 1_000L + MAX_WAIT_MILLIS - 1));
 
 		recordLock = createRecordLock();
 
-		dbFacadeAquire.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 2);
+		tableFacadeAquire.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 2);
 		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 1);
 	}
 
 	@Test
 	public void testGettingRecordLockClosesFacadeWhenTimeLimitIsReached() {
 		SqlConflictException conflict = SqlConflictException.withMessage("duplicate key");
-		dbFacadeAquire.MRV.setAlwaysThrowException("executeSqlWithValues", conflict);
+		tableFacadeAquire.MRV.setAlwaysThrowException("insertRowUsingQuery", conflict);
 		timeSource.MRV.setReturnValues("currentTimeMillis",
 				List.of(1_000L, 1_010L, 1_000L + MAX_WAIT_MILLIS));
 
@@ -176,15 +179,16 @@ public class RecordLockTest {
 					+ " and id: " + SOME_ID + " within " + MAX_WAIT_MILLIS + " ms.");
 			assertSame(e.getCause(), conflict);
 		}
-		dbFacadeAquire.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 2);
-		dbFacadeAquire.MCR.assertMethodWasCalled("close");
+		tableFacadeAquire.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 2);
+		tableFacadeAquire.MCR.assertMethodWasCalled("close");
 		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 1);
 	}
 
+	///
 	@Test
 	public void testGettingRecordLockWrapsOtherDatabaseErrorsAndClosesFacade() {
 		SqlDatabaseException error = SqlDatabaseException.withMessage("some error");
-		dbFacadeAquire.MRV.setAlwaysThrowException("executeSqlWithValues", error);
+		tableFacadeAquire.MRV.setAlwaysThrowException("insertRowUsingQuery", error);
 
 		try {
 			createRecordLock();
@@ -193,8 +197,8 @@ public class RecordLockTest {
 			assertTrue(e instanceof RecordLockException);
 			assertSame(e.getCause(), error);
 		}
-		dbFacadeAquire.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
-		dbFacadeAquire.MCR.assertMethodWasCalled("close");
+		tableFacadeAquire.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 1);
+		tableFacadeAquire.MCR.assertMethodWasCalled("close");
 		sleeper.MCR.assertMethodNotCalled("sleepMilliseconds");
 	}
 
@@ -202,8 +206,8 @@ public class RecordLockTest {
 	public void testGettingRecordLockPreservesAcquisitionAndCloseFailures() {
 		SqlDatabaseException acquisitionError = SqlDatabaseException.withMessage("some error");
 		SqlDatabaseException closeError = SqlDatabaseException.withMessage("close failed");
-		dbFacadeAquire.MRV.setAlwaysThrowException("executeSqlWithValues", acquisitionError);
-		dbFacadeAquire.MRV.setAlwaysThrowException("close", closeError);
+		tableFacadeAquire.MRV.setAlwaysThrowException("insertRowUsingQuery", acquisitionError);
+		tableFacadeAquire.MRV.setAlwaysThrowException("close", closeError);
 
 		try {
 			createRecordLock();
@@ -212,23 +216,37 @@ public class RecordLockTest {
 			assertSame(e.getCause(), acquisitionError);
 			assertSame(e.getCause().getSuppressed()[0], closeError);
 		}
-		dbFacadeAquire.MCR.assertMethodWasCalled("close");
-	}
-
-	private void assertAquireExecutedSqlWithTypeAndId(int callNumber, String sql) {
-		dbFacadeAquire.MCR.assertParameter("executeSqlWithValues", callNumber, "sql", sql);
-		dbFacadeAquire.MCR.assertParameterAsEqual("executeSqlWithValues", callNumber, "values",
-				List.of(SOME_TYPE, SOME_ID));
+		tableFacadeAquire.MCR.assertMethodWasCalled("close");
 	}
 
 	private void throwConflictForNumberOfInserts(int numberOfConflicts) {
+		tableFacadeAquire.noOfErrorsToThrowForInsertRow = new AtomicInteger(numberOfConflicts);
+	}
+
+	@Test
+	public void testErrorOnClose() {
+		dbFactory = new SqlDatabaseFactorySpy();
+		dbFactory.MRV.setReturnValues("factorTableQuery", List.of(tableQuery), "recordlock");
+		RuntimeException exception = new RuntimeException("some error!");
 		AtomicInteger calls = new AtomicInteger();
-		dbFacadeAquire.MRV.setDefaultReturnValuesSupplier("executeSqlWithValues", () -> {
-			if (calls.getAndIncrement() < numberOfConflicts) {
-				throw SqlConflictException.withMessage("duplicate key");
+		dbFactory.MRV.setDefaultReturnValuesSupplier("factorTableFacade", () -> {
+			if (calls.getAndIncrement() > 0) {
+				throw exception;
 			}
-			return 1;
+			return tableFacadeAquire;
 		});
+
+		recordLock = createRecordLock();
+
+		try {
+			recordLock.close();
+			fail("should have thrown");
+		} catch (Exception e) {
+			assertTrue(e instanceof RecordLockException);
+			assertEquals(e.getMessage(),
+					"Could not release lock for type: someType and id: someId.");
+			assertSame(e.getCause(), exception);
+		}
 	}
 
 	@Test
@@ -237,16 +255,93 @@ public class RecordLockTest {
 
 		recordLock.close();
 
-		dbFacadeRelease.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
-		assertReleaseExecutedSqlWithTypeAndId(0, DELETE_SQL);
-		dbFacadeRelease.MCR.assertMethodWasCalled("close");
+		tableFacadeRelease.MCR.assertNumberOfCallsToMethod("deleteRowsForQuery", 1);
+		tableFacadeRelease.MCR.assertCalledParameters("deleteRowsForQuery", tableQuery);
+		tableFacadeRelease.MCR.assertMethodWasCalled("close");
+	}
+
+	@Test
+	public void testCloseRecordLockRetriesEvery50msUntilLockIsInserted() {
+		RuntimeException exception = SqlConflictException.withMessage("duplicate key");
+		AtomicInteger calls = new AtomicInteger();
+		tableFacadeRelease.MRV.setDefaultReturnValuesSupplier("deleteRowsForQuery", () -> {
+			if (calls.getAndIncrement() < 3) {
+				throw exception;
+			}
+			return 1;
+		});
+		recordLock = createRecordLock();
+		recordLock.close();
+		tableFacadeRelease.MCR.assertNumberOfCallsToMethod("deleteRowsForQuery", 4);
+		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 3);
+		for (int call = 0; call < 3; call++) {
+			sleeper.MCR.assertParameters("sleepMilliseconds", call, RETRY_INTERVAL_MILLIS);
+		}
+	}
+
+	@Test
+	public void testCloseRecordLockReadsStartTimeOnceAndTimeAfterEachConflict() {
+		RuntimeException exception = SqlConflictException.withMessage("duplicate key");
+		AtomicInteger calls = new AtomicInteger();
+		tableFacadeRelease.MRV.setDefaultReturnValuesSupplier("deleteRowsForQuery", () -> {
+			if (calls.getAndIncrement() < 1) {
+				throw exception;
+			}
+			return 1;
+		});
+
+		recordLock = createRecordLock();
+		recordLock.close();
+
+		timeSource.MCR.assertNumberOfCallsToMethod("currentTimeMillis", 3);
+	}
+
+	@Test
+	public void testCloseRecordLockStillRetriesJustBeforeTimeLimit() {
+		RuntimeException exception = SqlConflictException.withMessage("duplicate key");
+		AtomicInteger calls = new AtomicInteger();
+		tableFacadeRelease.MRV.setDefaultReturnValuesSupplier("deleteRowsForQuery", () -> {
+			if (calls.getAndIncrement() < 3) {
+				throw exception;
+			}
+			return 1;
+		});
+		timeSource.MRV.setReturnValues("currentTimeMillis",
+				List.of(1_000L, 1_000L + MAX_WAIT_MILLIS - 1));
+
+		recordLock = createRecordLock();
+		recordLock.close();
+
+		tableFacadeRelease.MCR.assertNumberOfCallsToMethod("deleteRowsForQuery", 4);
+		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 3);
+	}
+
+	@Test
+	public void testCloseRecordLockClosesFacadeWhenTimeLimitIsReached() {
+		SqlConflictException conflict = SqlConflictException.withMessage("duplicate key");
+		tableFacadeRelease.MRV.setAlwaysThrowException("deleteRowsForQuery", conflict);
+		timeSource.MRV.setReturnValues("currentTimeMillis",
+				List.of(0L, 0L, 0L, 1_000L, 1_010L, 1_000L + MAX_WAIT_MILLIS));
+
+		try {
+			recordLock = createRecordLock();
+			recordLock.close();
+			fail("RecordLockException should have been thrown");
+		} catch (Exception e) {
+			assertTrue(e instanceof RecordLockException);
+			assertEquals(e.getMessage(), "Could not release lock for type: " + SOME_TYPE
+					+ " and id: " + SOME_ID + " within " + MAX_WAIT_MILLIS + " ms.");
+			assertSame(e.getCause(), conflict);
+		}
+		tableFacadeRelease.MCR.assertNumberOfCallsToMethod("deleteRowsForQuery", 4);
+		tableFacadeRelease.MCR.assertMethodWasCalled("close");
+		sleeper.MCR.assertNumberOfCallsToMethod("sleepMilliseconds", 3);
 	}
 
 	@Test
 	public void testCloseClosesFacadeCreatesRecordLockExceptionWithErrorAsCauseWhenReleaseFails() {
 		SqlDatabaseException error = SqlDatabaseException.withMessage("release failed");
-		dbFacadeRelease.MRV.setThrowException("executeSqlWithValues", error, DELETE_SQL,
-				List.of(SOME_TYPE, SOME_ID));
+		tableFacadeRelease.MRV.setThrowException("deleteRowsForQuery", error, tableQuery);
 		recordLock = createRecordLock();
 
 		try {
@@ -258,13 +353,13 @@ public class RecordLockTest {
 					"Could not release lock for type: someType and id: someId.");
 			assertSame(e.getCause(), error);
 		}
-		dbFacadeRelease.MCR.assertMethodWasCalled("close");
+		tableFacadeRelease.MCR.assertMethodWasCalled("close");
 	}
 
 	@Test
 	public void testCloseErrorOnCloseFacade() {
 		SqlDatabaseException error = SqlDatabaseException.withMessage("close failed");
-		dbFacadeRelease.MRV.setAlwaysThrowException("close", error);
+		tableFacadeRelease.MRV.setAlwaysThrowException("close", error);
 		recordLock = createRecordLock();
 
 		try {
@@ -276,16 +371,15 @@ public class RecordLockTest {
 					"Could not release lock for type: someType and id: someId.");
 			assertSame(e.getCause(), error);
 		}
-		dbFacadeRelease.MCR.assertMethodWasCalled("close");
+		tableFacadeRelease.MCR.assertMethodWasCalled("close");
 	}
 
 	@Test
 	public void testCloseErrorOnReleaseAndCloseFacade() {
 		SqlDatabaseException errorRelease = SqlDatabaseException.withMessage("release failed");
-		dbFacadeRelease.MRV.setThrowException("executeSqlWithValues", errorRelease, DELETE_SQL,
-				List.of(SOME_TYPE, SOME_ID));
+		tableFacadeRelease.MRV.setThrowException("deleteRowsForQuery", errorRelease, tableQuery);
 		SqlDatabaseException errorClose = SqlDatabaseException.withMessage("close failed");
-		dbFacadeRelease.MRV.setAlwaysThrowException("close", errorClose);
+		tableFacadeRelease.MRV.setAlwaysThrowException("close", errorClose);
 		recordLock = createRecordLock();
 
 		try {
@@ -298,7 +392,7 @@ public class RecordLockTest {
 			assertSame(e.getCause(), errorRelease);
 			assertSame(e.getCause().getSuppressed()[0], errorClose);
 		}
-		dbFacadeRelease.MCR.assertMethodWasCalled("close");
+		tableFacadeRelease.MCR.assertMethodWasCalled("close");
 	}
 
 	@Test
@@ -311,9 +405,4 @@ public class RecordLockTest {
 		assertSame(recordLockImp.onlyForTestGetTimeSource(), timeSource);
 	}
 
-	private void assertReleaseExecutedSqlWithTypeAndId(int callNumber, String sql) {
-		dbFacadeRelease.MCR.assertParameter("executeSqlWithValues", callNumber, "sql", sql);
-		dbFacadeRelease.MCR.assertParameterAsEqual("executeSqlWithValues", callNumber, "values",
-				List.of(SOME_TYPE, SOME_ID));
-	}
 }

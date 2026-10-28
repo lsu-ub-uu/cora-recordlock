@@ -18,21 +18,18 @@
  */
 package se.uu.ub.cora.recordlock;
 
-import java.util.List;
-
 import se.uu.ub.cora.spider.recordlock.RecordLock;
 import se.uu.ub.cora.spider.recordlock.RecordLockException;
-import se.uu.ub.cora.sqldatabase.DatabaseFacade;
 import se.uu.ub.cora.sqldatabase.SqlConflictException;
 import se.uu.ub.cora.sqldatabase.SqlDatabaseFactory;
+import se.uu.ub.cora.sqldatabase.table.TableFacade;
+import se.uu.ub.cora.sqldatabase.table.TableQuery;
 
 /**
  * RecordLockImp is a database implementation of {@link RecordLock} that stores locks in the
  * recordlock table in the database.
  */
 public class RecordLockImp implements RecordLock {
-	private static final String INSERT_SQL = "insert into recordlock (type, id) values (?, ?);";
-	private static final String DELETE_SQL = "delete from recordlock where type = ? and id = ?;";
 	private static final long RETRY_INTERVAL_MILLIS = 50;
 	private static final long MAX_WAIT_MILLIS = 60_000;
 
@@ -41,6 +38,7 @@ public class RecordLockImp implements RecordLock {
 	private final TimeSource timeSource;
 	private final String recordType;
 	private final String recordId;
+	private TableQuery tableQuery;
 
 	public static RecordLockImp usingDatabaseFactory(SqlDatabaseFactory databaseFactory,
 			String recordType, String recordId) {
@@ -61,57 +59,84 @@ public class RecordLockImp implements RecordLock {
 		this.timeSource = timeSource;
 		this.recordType = recordType;
 		this.recordId = recordId;
+		tableQuery = databaseFactory.factorTableQuery("recordlock");
+		tableQuery.addParameter("type", recordType);
+		tableQuery.addParameter("id", recordId);
+		// SPIKE
+		tableQuery.addCondition("type", recordType);
+		tableQuery.addCondition("id", recordId);
+		// SPIKE
+
 		acquireLock();
 	}
 
 	private void acquireLock() {
-		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
-			acquireUntilLockIsInserted(databaseFacade);
+		try (TableFacade tableFacade = databaseFactory.factorTableFacade()) {
+			acquireUntilLockIsInserted(tableFacade);
 		} catch (RuntimeException e) {
 			throw asRecordLockException(e, "acquire");
 		}
 	}
 
-	private void acquireUntilLockIsInserted(DatabaseFacade databaseFacade) {
+	private void acquireUntilLockIsInserted(TableFacade tableFacade) {
 		long deadline = timeSource.currentTimeMillis() + MAX_WAIT_MILLIS;
-		while (!tryToInsertLock(databaseFacade, deadline)) {
+		while (!tryToInsertLock(tableFacade, deadline)) {
 			sleeper.sleepMilliseconds(RETRY_INTERVAL_MILLIS);
 		}
 	}
 
-	private boolean tryToInsertLock(DatabaseFacade databaseFacade, long deadline) {
+	private boolean tryToInsertLock(TableFacade tableFacade, long deadline) {
 		try {
-			insertLock(databaseFacade);
+			insertLock(tableFacade);
 			return true;
 		} catch (SqlConflictException e) {
-			throwIfTimeLimitReached(deadline, e);
+			throwIfTimeLimitReached("acquire", deadline, e);
 			return false;
 		}
 	}
 
-	private void insertLock(DatabaseFacade databaseFacade) {
-		databaseFacade.executeSqlWithValues(INSERT_SQL, List.of(recordType, recordId));
+	private void insertLock(TableFacade tableFacade) {
+		tableFacade.insertRowUsingQuery(tableQuery);
 	}
 
-	private void throwIfTimeLimitReached(long deadline, SqlConflictException conflict) {
+	private void throwIfTimeLimitReached(String type, long deadline,
+			SqlConflictException conflict) {
 		if (timeSource.currentTimeMillis() >= deadline) {
-			throw RecordLockException.withMessageAndException("Could not acquire lock for type: "
-					+ recordType + " and id: " + recordId + " within " + MAX_WAIT_MILLIS + " ms.",
+			throw RecordLockException.withMessageAndException(
+					"Could not " + type + " lock for type: " + recordType + " and id: " + recordId
+							+ " within " + MAX_WAIT_MILLIS + " ms.",
 					conflict);
 		}
 	}
 
 	@Override
 	public void close() {
-		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
-			releaseLock(databaseFacade);
+		try (TableFacade tableFacade = databaseFactory.factorTableFacade()) {
+			releaseUntilLockIsDeleted(tableFacade);
 		} catch (RuntimeException e) {
 			throw asRecordLockException(e, "release");
 		}
 	}
 
-	private void releaseLock(DatabaseFacade databaseFacade) {
-		databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(recordType, recordId));
+	private void releaseUntilLockIsDeleted(TableFacade tableFacade) {
+		long deadline = timeSource.currentTimeMillis() + MAX_WAIT_MILLIS;
+		while (!tryToReleaseLock(tableFacade, deadline)) {
+			sleeper.sleepMilliseconds(RETRY_INTERVAL_MILLIS);
+		}
+	}
+
+	private boolean tryToReleaseLock(TableFacade tableFacade, long deadline) {
+		try {
+			releaseLock(tableFacade);
+			return true;
+		} catch (SqlConflictException e) {
+			throwIfTimeLimitReached("release", deadline, e);
+			return false;
+		}
+	}
+
+	private void releaseLock(TableFacade tableFacade) {
+		tableFacade.deleteRowsForQuery(tableQuery);
 	}
 
 	private RecordLockException asRecordLockException(RuntimeException failure, String operation) {

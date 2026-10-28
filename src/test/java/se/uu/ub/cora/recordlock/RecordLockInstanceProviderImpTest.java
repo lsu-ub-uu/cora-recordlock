@@ -33,8 +33,8 @@ import se.uu.ub.cora.initialize.SettingsProvider;
 import se.uu.ub.cora.logger.LoggerFactory;
 import se.uu.ub.cora.logger.LoggerProvider;
 import se.uu.ub.cora.logger.spies.LoggerFactorySpy;
-import se.uu.ub.cora.recordlock.spy.DatabaseFacadeSpy;
 import se.uu.ub.cora.recordlock.spy.SqlDatabaseFactorySpy;
+import se.uu.ub.cora.recordlock.spy.TableFacadeSpy;
 import se.uu.ub.cora.sqldatabase.SqlDatabaseFactoryImp;
 
 public class RecordLockInstanceProviderImpTest {
@@ -72,27 +72,24 @@ public class RecordLockInstanceProviderImpTest {
 	@Test
 	public void testGetRecordLockAcquiresLockForProvidedRecord() {
 		SqlDatabaseFactorySpy databaseFactory = new SqlDatabaseFactorySpy();
-		DatabaseFacadeSpy databaseFacade = new DatabaseFacadeSpy();
-		databaseFactory.MRV.setDefaultReturnValuesSupplier("factorDatabaseFacade",
-				() -> databaseFacade);
+		TableFacadeSpy tableFacade = new TableFacadeSpy();
+		databaseFactory.MRV.setDefaultReturnValuesSupplier("factorTableFacade", () -> tableFacade);
 		provider = new RecordLockInstanceProviderImp(databaseFactory);
 
 		RecordLockImp recordLock = (RecordLockImp) provider.getRecordLock("someType", "someId");
 
 		assertEquals(recordLock.onlyForTestGetDatabaseFactory(), databaseFactory);
-		databaseFacade.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
-		databaseFacade.MCR.assertParameterAsEqual("executeSqlWithValues", 0, "values",
-				List.of("someType", "someId"));
+		tableFacade.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 1);
 	}
 
 	@Test
-	public void testEachGetRecordLockUsesItsOwnDatabaseFacade() {
+	public void testEachGetRecordLockUsesItsOwnTableFacade() {
 		SqlDatabaseFactorySpy databaseFactory = new SqlDatabaseFactorySpy();
-		DatabaseFacadeSpy firstFacade = new DatabaseFacadeSpy();
-		DatabaseFacadeSpy secondFacade = new DatabaseFacadeSpy();
-		List<DatabaseFacadeSpy> facades = List.of(firstFacade, secondFacade);
+		TableFacadeSpy firstFacade = new TableFacadeSpy();
+		TableFacadeSpy secondFacade = new TableFacadeSpy();
+		List<TableFacadeSpy> facades = List.of(firstFacade, secondFacade);
 		AtomicInteger facadeNumber = new AtomicInteger();
-		databaseFactory.MRV.setDefaultReturnValuesSupplier("factorDatabaseFacade",
+		databaseFactory.MRV.setDefaultReturnValuesSupplier("factorTableFacade",
 				() -> facades.get(facadeNumber.getAndIncrement()));
 		provider = new RecordLockInstanceProviderImp(databaseFactory);
 
@@ -100,8 +97,8 @@ public class RecordLockInstanceProviderImpTest {
 		RecordLockImp secondLock = (RecordLockImp) provider.getRecordLock("someType", "secondId");
 
 		assertNotSame(firstLock, secondLock);
-		firstFacade.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
-		secondFacade.MCR.assertNumberOfCallsToMethod("executeSqlWithValues", 1);
+		firstFacade.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 1);
+		secondFacade.MCR.assertNumberOfCallsToMethod("insertRowUsingQuery", 1);
 	}
 
 }

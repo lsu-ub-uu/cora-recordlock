@@ -33,6 +33,8 @@ public class SqlDatabaseFactorySpy implements SqlDatabaseFactory {
 	public SqlDatabaseFactorySpy() {
 		MCR.useMRV(MRV);
 		MRV.setDefaultReturnValuesSupplier("factorDatabaseFacade", DatabaseFacadeSpy::new);
+		MRV.setDefaultReturnValuesSupplier("factorTableFacade", TableFacadeSpy::new);
+		MRV.setDefaultReturnValuesSupplier("factorTableQuery", TableQuerySpy::new);
 	}
 
 	@Override
@@ -42,14 +44,12 @@ public class SqlDatabaseFactorySpy implements SqlDatabaseFactory {
 
 	@Override
 	public TableFacade factorTableFacade() {
-		// TODO Auto-generated method stub
-		return null;
+		return (TableFacade) MCR.addCallAndReturnFromMRV();
 	}
 
 	@Override
 	public TableQuery factorTableQuery(String tableName) {
-		// TODO Auto-generated method stub
-		return null;
+		return (TableQuery) MCR.addCallAndReturnFromMRV("tableName", tableName);
 	}
 
 	@Override
