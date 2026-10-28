@@ -39,6 +39,7 @@ public class RecordLockImp implements RecordLock {
 	private final String recordType;
 	private final String recordId;
 	private TableQuery tableQuery;
+	private TableQuery tableQueryRelease;
 
 	public static RecordLockImp usingDatabaseFactory(SqlDatabaseFactory databaseFactory,
 			String recordType, String recordId) {
@@ -63,10 +64,10 @@ public class RecordLockImp implements RecordLock {
 		tableQuery.addParameter("type", recordType);
 		tableQuery.addParameter("id", recordId);
 		// SPIKE
-		tableQuery.addCondition("type", recordType);
-		tableQuery.addCondition("id", recordId);
+		tableQueryRelease = databaseFactory.factorTableQuery("recordlock");
+		tableQueryRelease.addCondition("type", recordType);
+		tableQueryRelease.addCondition("id", recordId);
 		// SPIKE
-
 		acquireLock();
 	}
 
@@ -136,7 +137,7 @@ public class RecordLockImp implements RecordLock {
 	}
 
 	private void releaseLock(TableFacade tableFacade) {
-		tableFacade.deleteRowsForQuery(tableQuery);
+		tableFacade.deleteRowsForQuery(tableQueryRelease);
 	}
 
 	private RecordLockException asRecordLockException(RuntimeException failure, String operation) {
