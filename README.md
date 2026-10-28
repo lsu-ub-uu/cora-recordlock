@@ -5,8 +5,9 @@ cora-sqldatabase provides interfaces and classes to use a sql database in a Cora
 ## Record lock
 
 cora-sqldatabase implements the `RecordLock` abstraction from
-[cora-recordlock](https://github.com/lsu-ub-uu/cora-recordlock). cora-spider only depends on
-cora-recordlock and gets a lock through `RecordLockProvider.getRecordLock()`.
+[cora-recordlock](https://github.com/lsu-ub-uu/cora-recordlock). cora-spider gets an already
+acquired lock through `RecordLockInstanceProvider.getRecordLock(recordType, recordId)` and releases
+it by closing the returned lock.
 
 ### Configuration
 
@@ -23,13 +24,14 @@ it through cora-initialize when this jar is on the classpath.
 
 ### Behaviour and lifecycle
 
-* `getRecordLock()` reads the lookup name and returns a new `RecordLock` for each call.
-* Every `acquire` and `release` uses its own new `DatabaseFacade`, which is closed before the
-  call returns, on success as well as on failure. A lock operation therefore never runs inside a
-  transaction started by someone else.
-* `acquire(type, id)` inserts a row into `recordlock`. If the row exists (`SqlConflictException`)
-  it waits 50 ms and tries again, for at most 60 s. Other errors are not retried.
-* `release(type, id)` deletes the row. Releasing a lock that is not held does nothing.
+* `getRecordLock(recordType, recordId)` acquires the lock before returning a new `RecordLock`.
+  The returned lock represents that one record and is not intended to be shared between threads.
+* Acquisition inserts a row into `recordlock`. If the row exists (`SqlConflictException`) it waits
+  50 ms and retries for at most 60 s. Other errors are not retried.
+* The acquired lock owns its `DatabaseFacade`. `close()` deletes the row and closes the facade,
+  including when release fails. If acquisition fails, the allocated facade is closed before the
+  failure is rethrown.
+* Clients must release locks by closing them, preferably with try-with-resources.
 
 ### Errors
 

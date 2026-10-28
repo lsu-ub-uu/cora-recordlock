@@ -36,66 +36,90 @@ public class RecordLockImp implements RecordLock {
 	private static final long RETRY_INTERVAL_MILLIS = 50;
 	private static final long MAX_WAIT_MILLIS = 60_000;
 
-	private SqlDatabaseFactory databaseFactory;
-	private Sleeper sleeper;
-	private TimeSource timeSource;
-	private DatabaseFacade databaseFacade;
+	private final SqlDatabaseFactory databaseFactory;
+	private final Sleeper sleeper;
+	private final TimeSource timeSource;
+	private final String recordType;
+	private final String recordId;
 
-	public static RecordLockImp usingDatabaseFactory(SqlDatabaseFactory databaseFactory) {
-		return new RecordLockImp(databaseFactory, new ThreadSleeper(), new SystemTimeSource());
+	public static RecordLockImp usingDatabaseFactory(SqlDatabaseFactory databaseFactory,
+			String recordType, String recordId) {
+		return new RecordLockImp(databaseFactory, new ThreadSleeper(), new SystemTimeSource(),
+				recordType, recordId);
 	}
 
 	static RecordLockImp usingDatabaseFacadeAndSleeperAndTimeSource(
-			SqlDatabaseFactory databaseFactory, Sleeper sleeper, TimeSource timeSource) {
-		return new RecordLockImp(databaseFactory, sleeper, timeSource);
+			SqlDatabaseFactory databaseFactory, Sleeper sleeper, TimeSource timeSource,
+			String recordType, String recordId) {
+		return new RecordLockImp(databaseFactory, sleeper, timeSource, recordType, recordId);
 	}
 
 	private RecordLockImp(SqlDatabaseFactory databaseFactory, Sleeper sleeper,
-			TimeSource timeSource) {
+			TimeSource timeSource, String recordType, String recordId) {
 		this.databaseFactory = databaseFactory;
 		this.sleeper = sleeper;
 		this.timeSource = timeSource;
-		databaseFacade = databaseFactory.factorDatabaseFacade();
+		this.recordType = recordType;
+		this.recordId = recordId;
+		acquireLock();
 	}
 
-	@Override
-	public void acquire(String type, String id) {
+	private void acquireLock() {
+		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
+			acquireUntilLockIsInserted(databaseFacade);
+		} catch (RuntimeException e) {
+			throw asRecordLockException(e, "acquire");
+		}
+	}
+
+	private void acquireUntilLockIsInserted(DatabaseFacade databaseFacade) {
 		long deadline = timeSource.currentTimeMillis() + MAX_WAIT_MILLIS;
-		while (!tryToInsertLock(type, id, deadline)) {
+		while (!tryToInsertLock(databaseFacade, deadline)) {
 			sleeper.sleepMilliseconds(RETRY_INTERVAL_MILLIS);
 		}
 	}
 
-	private boolean tryToInsertLock(String type, String id, long deadline) {
+	private boolean tryToInsertLock(DatabaseFacade databaseFacade, long deadline) {
 		try {
-			insertLock(type, id);
+			insertLock(databaseFacade);
 			return true;
 		} catch (SqlConflictException e) {
-			throwIfTimeLimitReached(deadline, type, id, e);
+			throwIfTimeLimitReached(deadline, e);
 			return false;
 		}
 	}
 
-	private void insertLock(String type, String id) {
-		databaseFacade.executeSqlWithValues(INSERT_SQL, List.of(type, id));
+	private void insertLock(DatabaseFacade databaseFacade) {
+		databaseFacade.executeSqlWithValues(INSERT_SQL, List.of(recordType, recordId));
 	}
 
-	private void throwIfTimeLimitReached(long deadline, String type, String id,
-			SqlConflictException conflict) {
+	private void throwIfTimeLimitReached(long deadline, SqlConflictException conflict) {
 		if (timeSource.currentTimeMillis() >= deadline) {
 			throw RecordLockException.withMessageAndException("Could not acquire lock for type: "
-					+ type + " and id: " + id + " within " + MAX_WAIT_MILLIS + " ms.", conflict);
+					+ recordType + " and id: " + recordId + " within " + MAX_WAIT_MILLIS + " ms.",
+					conflict);
 		}
 	}
 
 	@Override
-	public void release(String type, String id) {
-		databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(type, id));
+	public void close() {
+		try (DatabaseFacade databaseFacade = databaseFactory.factorDatabaseFacade()) {
+			releaseLock(databaseFacade);
+		} catch (RuntimeException e) {
+			throw asRecordLockException(e, "release");
+		}
 	}
 
-	@Override
-	public void close() {
-		databaseFacade.close();
+	private void releaseLock(DatabaseFacade databaseFacade) {
+		databaseFacade.executeSqlWithValues(DELETE_SQL, List.of(recordType, recordId));
+	}
+
+	private RecordLockException asRecordLockException(RuntimeException failure, String operation) {
+		if (failure instanceof RecordLockException recordLockEx) {
+			return recordLockEx;
+		}
+		return RecordLockException.withMessageAndException("Could not " + operation
+				+ " lock for type: " + recordType + " and id: " + recordId + ".", failure);
 	}
 
 	public SqlDatabaseFactory onlyForTestGetDatabaseFactory() {

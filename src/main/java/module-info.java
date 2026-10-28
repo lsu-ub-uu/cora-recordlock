@@ -1,7 +1,6 @@
 
 /**
- * The recordlock module provides interfaces and classes to use a record lock in a Cora based
- * system.
+ * The recordlock module provides an implementation of recordLock backed by a database table
  * <p>
  * 
  */

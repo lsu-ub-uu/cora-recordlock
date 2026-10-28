@@ -25,15 +25,19 @@ import se.uu.ub.cora.sqldatabase.SqlDatabaseFactory;
 import se.uu.ub.cora.sqldatabase.SqlDatabaseFactoryImp;
 
 public class RecordLockInstanceProviderImp implements RecordLockInstanceProvider {
-	private SqlDatabaseFactory databaseFactory;
+	private final SqlDatabaseFactory databaseFactory;
 
 	public RecordLockInstanceProviderImp() {
-		startStorage();
+		this(startStorage());
 	}
 
-	private void startStorage() {
+	RecordLockInstanceProviderImp(SqlDatabaseFactory databaseFactory) {
+		this.databaseFactory = databaseFactory;
+	}
+
+	private static SqlDatabaseFactory startStorage() {
 		String databaseLookupValue = SettingsProvider.getSetting("coraDatabaseLookupName");
-		databaseFactory = SqlDatabaseFactoryImp.usingLookupNameFromContext(databaseLookupValue);
+		return SqlDatabaseFactoryImp.usingLookupNameFromContext(databaseLookupValue);
 	}
 
 	@Override
@@ -42,8 +46,8 @@ public class RecordLockInstanceProviderImp implements RecordLockInstanceProvider
 	}
 
 	@Override
-	public RecordLock getRecordLock() {
-		return RecordLockImp.usingDatabaseFactory(databaseFactory);
+	public RecordLock getRecordLock(String recordType, String recordId) {
+		return RecordLockImp.usingDatabaseFactory(databaseFactory, recordType, recordId);
 	}
 
 	public SqlDatabaseFactory onlyForTestGetSqlDatabaseFactory() {
