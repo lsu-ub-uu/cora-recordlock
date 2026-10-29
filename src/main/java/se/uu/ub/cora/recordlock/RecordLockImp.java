@@ -22,6 +22,7 @@ import se.uu.ub.cora.spider.recordlock.RecordLock;
 import se.uu.ub.cora.spider.recordlock.RecordLockException;
 import se.uu.ub.cora.sqldatabase.SqlConflictException;
 import se.uu.ub.cora.sqldatabase.SqlDatabaseFactory;
+import se.uu.ub.cora.sqldatabase.SqlTransactionException;
 import se.uu.ub.cora.sqldatabase.table.TableFacade;
 import se.uu.ub.cora.sqldatabase.table.TableQuery;
 
@@ -60,15 +61,18 @@ public class RecordLockImp implements RecordLock {
 		this.timeSource = timeSource;
 		this.recordType = recordType;
 		this.recordId = recordId;
+		setUpTableQueries(databaseFactory, recordType, recordId);
+		acquireLock();
+	}
+
+	private void setUpTableQueries(SqlDatabaseFactory databaseFactory, String recordType,
+			String recordId) {
 		tableQuery = databaseFactory.factorTableQuery("recordlock");
 		tableQuery.addParameter("type", recordType);
 		tableQuery.addParameter("id", recordId);
-		// SPIKE
 		tableQueryRelease = databaseFactory.factorTableQuery("recordlock");
 		tableQueryRelease.addCondition("type", recordType);
 		tableQueryRelease.addCondition("id", recordId);
-		// SPIKE
-		acquireLock();
 	}
 
 	private void acquireLock() {
@@ -90,7 +94,7 @@ public class RecordLockImp implements RecordLock {
 		try {
 			insertLock(tableFacade);
 			return true;
-		} catch (SqlConflictException e) {
+		} catch (SqlConflictException | SqlTransactionException e) {
 			throwIfTimeLimitReached("acquire", deadline, e);
 			return false;
 		}
@@ -100,8 +104,7 @@ public class RecordLockImp implements RecordLock {
 		tableFacade.insertRowUsingQuery(tableQuery);
 	}
 
-	private void throwIfTimeLimitReached(String type, long deadline,
-			SqlConflictException conflict) {
+	private void throwIfTimeLimitReached(String type, long deadline, RuntimeException conflict) {
 		if (timeSource.currentTimeMillis() >= deadline) {
 			throw RecordLockException.withMessageAndException(
 					"Could not " + type + " lock for type: " + recordType + " and id: " + recordId
@@ -130,7 +133,7 @@ public class RecordLockImp implements RecordLock {
 		try {
 			releaseLock(tableFacade);
 			return true;
-		} catch (SqlConflictException e) {
+		} catch (SqlTransactionException e) {
 			throwIfTimeLimitReached("release", deadline, e);
 			return false;
 		}

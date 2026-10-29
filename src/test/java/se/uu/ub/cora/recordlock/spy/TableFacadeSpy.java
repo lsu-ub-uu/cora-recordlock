@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import se.uu.ub.cora.sqldatabase.Row;
 import se.uu.ub.cora.sqldatabase.SqlConflictException;
+import se.uu.ub.cora.sqldatabase.SqlTransactionException;
 import se.uu.ub.cora.sqldatabase.table.TableFacade;
 import se.uu.ub.cora.sqldatabase.table.TableQuery;
 import se.uu.ub.cora.testutils.mcr.MethodCallRecorder;
@@ -32,7 +33,8 @@ import se.uu.ub.cora.testutils.mrv.MethodReturnValues;
 public class TableFacadeSpy implements TableFacade {
 	public MethodCallRecorder MCR = new MethodCallRecorder();
 	public MethodReturnValues MRV = new MethodReturnValues();
-	public AtomicInteger noOfErrorsToThrowForInsertRow = new AtomicInteger(0);
+	public AtomicInteger noOfConflictErrorsToThrowForInsertRow = new AtomicInteger(0);
+	public AtomicInteger noOfTransactionErrorsToThrowForInsertRow = new AtomicInteger(0);
 
 	public TableFacadeSpy() {
 		MCR.useMRV(MRV);
@@ -47,8 +49,11 @@ public class TableFacadeSpy implements TableFacade {
 	@Override
 	public void insertRowUsingQuery(TableQuery tableQuery) {
 		MCR.addCall("tableQuery", tableQuery);
-		if (noOfErrorsToThrowForInsertRow.getAndDecrement() > 0) {
+		if (noOfConflictErrorsToThrowForInsertRow.getAndDecrement() > 0) {
 			throw SqlConflictException.withMessage("duplicate key");
+		}
+		if (noOfTransactionErrorsToThrowForInsertRow.getAndDecrement() > 0) {
+			throw SqlTransactionException.withMessage("transaction failed");
 		}
 	}
 
