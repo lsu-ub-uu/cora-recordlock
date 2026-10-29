@@ -38,6 +38,7 @@
 		<logger-spies.version>1.5.0</logger-spies.version>
 		<testutils.version>1.14.0</testutils.version>
 		<testspies.version>1.2.0</testspies.version>
+		<initializespies.version>1.7.0</initializespies.version>
 	</properties>
 
 	<scm>
@@ -138,7 +139,7 @@
 		<dependency>
 			<groupId>se.uu.ub.cora</groupId>
 			<artifactId>initialize-spies</artifactId>
-			<version>1.8-SNAPSHOT</version>
+			<version>${initializespies.version}</version>
 		</dependency>
 	</dependencies>
 </project>
