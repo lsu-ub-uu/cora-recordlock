@@ -17,7 +17,7 @@
 	</parent>
 
 	<artifactId>recordlock</artifactId>
-	<version>1.0-SNAPSHOT</version>
+	<version>1.0.0-SNAPSHOT</version>
 	<packaging>jar</packaging>
 
 	<name>cora-recordlock</name>
@@ -44,7 +44,7 @@
 		<connection>scm:git:https://github.com/lsu-ub-uu/cora-recordlock.git</connection>
 		<developerConnection>scm:git:https://github.com/lsu-ub-uu/cora-recordlock.git</developerConnection>
 		<url>https://github.com/lsu-ub-uu/cora-recordlock.git</url>
-		<tag>HEAD</tag>
+		<tag>release/1.0</tag>
 	</scm>
 
 
